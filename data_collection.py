@@ -2,7 +2,7 @@ import os
 from googleapiclient.discovery import build
 from youtube_transcript_api import YouTubeTranscriptApi
 from dotenv import load_dotenv
-from statistics import median
+import statistics
 import re
 import openai
 
@@ -33,81 +33,49 @@ def iso8601_duration_to_seconds(duration):
     return hours * 3600 + minutes * 60 + seconds
 
 
-def fetch_video_details(query, max_results=1000):
+def fetch_top_videos(query, max_results=100, order="viewCount"):
     search_response = youtube.search().list(
         q=query,
-        part="id,snippet",
+        type="video",
+        order=order,
+        part="id",
         maxResults=max_results
     ).execute()
 
-    video_ids = [search_result["id"]["videoId"] for search_result in search_response.get(
-        "items", []) if search_result["id"]["kind"] == "youtube#video"]
+    video_ids = [item["id"]["videoId"] for item in search_response["items"]]
+    return video_ids
 
+
+def fetch_video_details(video_ids):
     video_details_response = youtube.videos().list(
         id=','.join(video_ids),
         part="id,snippet,statistics,contentDetails"
     ).execute()
 
-    # Fetching video categories
-    category_response = youtube.videoCategories().list(
-        part="id,snippet",
-        regionCode="IN"  # Assuming you're focusing on India, change as needed
-    ).execute()
-    category_dict = {item["id"]: item["snippet"]["title"]
-                     for item in category_response.get("items", [])}
-
-    videos = []
-    for video in video_details_response.get("items", []):
-        # Extract hashtags from description
-        hashtags = re.findall(r'#\w+', video["snippet"]["description"])
-        video_data = {
-            "title": video["snippet"]["title"],
-            "description": video["snippet"]["description"],
-            "channel_name": video["snippet"]["channelTitle"],
-            "views": video["statistics"]["viewCount"],
-            "likes": video["statistics"].get("likeCount", 0),
-            "dislikes": video["statistics"].get("dislikeCount", 0),
-            "comments": video["statistics"].get("commentCount", 0),
-            "upload_date": video["snippet"]["publishedAt"],
-            "duration": video["contentDetails"]["duration"],
-            "language": video["snippet"].get("defaultAudioLanguage", "Unknown"),
-            "category": category_dict.get(video["snippet"]["categoryId"], "Unknown"),
-            "hashtags": hashtags
-        }
-        videos.append(video_data)
-    # Sorting videos by views
-    videos.sort(key=lambda x: int(x['views']), reverse=True)
-
-    return videos[:max_results]  # Return top videos based on views
+    videos = video_details_response["items"]
+    return videos
 
 
 def calculate_statistics(videos):
-    views = [int(video['views']) for video in videos if video['views']]
-    subscribers = [int(video['channel_subscribers'])
-                   for video in videos if video.get('channel_subscribers')]
-    comments = [int(video['comments'])
-                for video in videos if video['comments']]
-    durations = [iso8601_duration_to_seconds(
-        video['duration']) for video in videos if video['duration']]
-    upload_dates = [int(video['upload_date'].split('-')[0])
-                    for video in videos]  # Extracting year
+    views = [int(video['statistics']['viewCount'])
+             for video in videos if 'viewCount' in video['statistics']]
+    likes = [int(video['statistics']['likeCount'])
+             for video in videos if 'likeCount' in video['statistics']]
+    dislikes = [int(video['statistics']['dislikeCount'])
+                for video in videos if 'dislikeCount' in video['statistics']]
+    comments = [int(video['statistics']['commentCount'])
+                for video in videos if 'commentCount' in video['statistics']]
 
     stats = {
-        "average_views": sum(views) / len(views),
-        "median_views": median(views),
-        "average_subscribers": sum(subscribers) / len(subscribers),
-        "median_subscribers": median(subscribers),
-        "total_channels": len(set([video['channel_name'] for video in videos])),
-        "average_comments": sum(comments) / len(comments),
-        "median_comments": median(comments),
-        "average_duration": sum(durations) / len(durations),
-        "median_duration": median(durations),
-        "most_common_upload_year": mode(upload_dates),
-        "related_categories": list(set([video['category'] for video in videos])),
-        # You'll need to implement this function
-        "common_hashtags": most_common_hashtags(videos)
+        "average_views": sum(views) / len(views) if views else "No data",
+        "median_views": statistics.median(views) if views else "No data",
+        "average_likes": sum(likes) / len(likes) if likes else "No data",
+        "median_likes": statistics.median(likes) if likes else "No data",
+        "average_dislikes": sum(dislikes) / len(dislikes) if dislikes else "No data",
+        "median_dislikes": statistics.median(dislikes) if dislikes else "No data",
+        "average_comments": sum(comments) / len(comments) if comments else "No data",
+        "median_comments": statistics.median(comments) if comments else "No data",
     }
-
     return stats
 
 
@@ -159,7 +127,24 @@ def fetch_all_insights(videos, batch_size=5):
 #         print(insight)
 
 if __name__ == "__main__":
-    query = input("I want to make a video about, ")
-    videos = fetch_video_details(query)
+    query = input("I want to make a video about")
+
+    print("\nOptimize for:")
+    print("1. Views")
+    print("2. Recency")
+    print("3. Subscribers (Note: This will sort by channel popularity, not individual video subscribers)")
+
+    choice = input("Enter your choice (1/2/3): ")
+
+    order = "viewCount"  # default
+    if choice == "2":
+        order = "date"
+    elif choice == "3":
+        # This will sort by the number of videos a channel has, as a proxy for channel popularity
+        order = "videoCount"
+
+    top_video_ids = fetch_top_videos(query, order=order)
+    videos = fetch_video_details(top_video_ids)
     stats = calculate_statistics(videos)
-    print(stats)
+    for key, value in stats.items():
+        print(f"{key}: {value}")
