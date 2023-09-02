@@ -5,6 +5,9 @@ from dotenv import load_dotenv
 import statistics
 import re
 import openai
+from wordcloud import WordCloud
+from wordcloud import STOPWORDS
+import matplotlib.pyplot as plt
 
 load_dotenv()
 
@@ -33,6 +36,24 @@ def iso8601_duration_to_seconds(duration):
     return hours * 3600 + minutes * 60 + seconds
 
 
+def chunk_text(text, max_length):
+    """Breaks down a long text into chunks that are within the specified max_length."""
+    words = text.split()
+    chunks = []
+    current_chunk = []
+
+    for word in words:
+        if len(' '.join(current_chunk) + ' ' + word) <= max_length:
+            current_chunk.append(word)
+        else:
+            chunks.append(' '.join(current_chunk))
+            current_chunk = [word]
+    chunks.append(' '.join(current_chunk))
+    return chunks
+
+# Fetch and sort videos based on user input
+
+
 def fetch_top_videos(query, max_results=100, order="viewCount"):
     search_response = youtube.search().list(
         q=query,
@@ -45,6 +66,8 @@ def fetch_top_videos(query, max_results=100, order="viewCount"):
     video_ids = [item["id"]["videoId"] for item in search_response["items"]]
     return video_ids
 
+# Fetch video details based on predefined format
+
 
 def fetch_video_details(video_ids):
     video_details_response = youtube.videos().list(
@@ -54,6 +77,8 @@ def fetch_video_details(video_ids):
 
     videos = video_details_response["items"]
     return videos
+
+# Calculate stats for videos
 
 
 def calculate_statistics(videos):
@@ -79,55 +104,136 @@ def calculate_statistics(videos):
     return stats
 
 
-def generate_insights_for_batch(video_batch):
-    messages = [{"role": "system",
-                 "content": "You are a helpful assistant that provides insights on YouTube videos."}]
+def format_metadata(videos):
+    formatted_data = []
+    for video in videos:
+        title = video.get('title', 'Unknown Title')
+        channel_name = video.get('channel_name', 'Unknown Channel')
+        views = video.get('views', 'Unknown Views')
+        subscribers = video.get('subscribers', 'Unknown Subscribers')
+        publish_date = video.get('publish_date', 'Unknown Date')
 
-    for video in video_batch:
-        user_message = f"Tell me about this video: {video['title']} by {video['channel_name']}. It has {video['views']} views and was uploaded on {video['upload_date']}."
-        messages.append({"role": "user", "content": user_message})
-
-    response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
-        messages=messages
-    )
-
-    # Extracting the assistant's messages from the response
-    assistant_messages = [choice['message']['content']
-                          for choice in response['choices']]
-
-    return assistant_messages
+        formatted_data.append(
+            f"Video titled {title} by {channel_name} has {views} views and {subscribers} subscribers. It was published on {publish_date}."
+        )
+    return ' '.join(formatted_data)
 
 
-def fetch_all_insights(videos, batch_size=5):
-    insights = []
+# Fetch transcripts of videos & comments
 
-    # Split videos into batches
-    video_batches = [videos[i:i + batch_size]
-                     for i in range(0, len(videos), batch_size)]
 
-    # Use ThreadPoolExecutor for parallel processing
-    with ThreadPoolExecutor() as executor:
-        results = list(executor.map(
-            generate_insights_for_batch, video_batches))
+def fetch_transcripts(video_ids):
+    transcripts = {}
+    for video_id in video_ids:
+        try:
+            transcript = YouTubeTranscriptApi.get_transcript(video_id)
+            transcripts[video_id] = transcript
+        except:
+            continue
+    return transcripts
 
-    # Flatten the results
-    for batch in results:
-        insights.extend(batch)
+
+def fetch_comments(video_ids, max_comments=100):
+    comments = {}
+    for video_id in video_ids:
+        try:
+            response = youtube.commentThreads().list(
+                part="snippet",
+                videoId=video_id,
+                maxResults=max_comments,
+                order="relevance",  # Fetch most relevant comments
+                textFormat="plainText"
+            ).execute()
+
+            comments_list = [item["snippet"]["topLevelComment"]
+                             ["snippet"]["textDisplay"] for item in response["items"]]
+            comments[video_id] = comments_list
+        except:
+            continue
+    return comments
+
+# Analyze chunked up content
+
+
+def analyze_with_openai(prompt, text):
+    CHUNK_SIZE = 1850  # Adjust based on the model's token limit
+    chunks = [text[i:i+CHUNK_SIZE] for i in range(0, len(text), CHUNK_SIZE)]
+    responses = []
+
+    for chunk in chunks:
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system",
+                    "content": "You are an expert social media research consultant"},
+                {"role": "user", "content": prompt},
+                {"role": "assistant", "content": chunk}
+            ]
+        )
+        responses.append(response.choices[0].message['content'].strip())
+
+    return ' '.join(responses)
+
+
+# Derive insights from aggregated responses
+
+
+def derive_insights(transcripts, comments, videos):
+    insights = {}
+
+   # Combine all transcripts and comments
+    transcript_text = " ".join(transcripts)
+    comments_text = " ".join(comments)
+
+    # Format metadata
+    metadata = format_metadata(videos)
+
+    # Base prompt
+    # Replace with the actual topic the user inputted
+    user_topic = query
+    # Replace with the actual goal the user inputted
+    user_goal = choice
+    base_prompt = f"Role: System. Content: You are an expert social media research consultant hired to provide qualitative research insights for a creator. The creator wants to make a video about {user_topic} and aims to optimize for {user_goal}. Based on the provided data about various videos, their views, likes, dislikes, and the content of their transcripts and comments, please provide insights on the following:"
+
+    # Analyze Transcripts
+    insights['transcript_analysis'] = {
+        "biggest_youtuber": analyze_with_openai(base_prompt + " Who is the biggest YouTuber in this category?", transcript_text + ' ' + metadata),
+        "topics_covered": analyze_with_openai(base_prompt + " What topics are most often covered in these transcripts?", transcript_text)
+    }
+
+    # Analyze Comments
+    insights['comment_analysis'] = {
+        "positive_reactions": analyze_with_openai(base_prompt + " What are the positive reactions in these comments related to?", comments_text),
+        "negative_reactions": analyze_with_openai(base_prompt + " What are the negative reactions in these comments related to?", comments_text),
+        "referenced_creators": analyze_with_openai(base_prompt + " Which creators or YouTubers are referenced often in these comments?", comments_text),
+        "viewer_requests": analyze_with_openai(base_prompt + " What do viewers request or wish to see most often in these comments?", comments_text),
+        "tired_topics": analyze_with_openai(base_prompt + " What topics or themes do viewers seem tired of or mention negatively?", comments_text),
+        # Assuming you've integrated the word cloud function
+        "word_cloud": analyze_with_openai(base_prompt + "Generate a list of words for a wordcloud of the most commonly used words and phrases", comments_text)
+    }
 
     return insights
 
 
-# Example usage:
-# if __name__ == "__main__":
-#     query = input("Enter a search query: ")
-#     videos = fetch_video_details(query)
-#     all_insights = fetch_all_insights(videos)
-#     for insight in all_insights:
-#         print(insight)
+# def generate_wordcloud(text):
+#     wordcloud = WordCloud(width=800, height=800,
+#                           background_color='white',
+#                           stopwords=set(STOPWORDS),
+#                           min_font_size=10).generate(text)
+
+#     plt.figure(figsize=(8, 8), facecolor=None)
+#     plt.imshow(wordcloud)
+#     plt.axis("off")
+#     plt.tight_layout(pad=0)
+#     plt.show()
+#     if save_to_file:
+#         plt.savefig("wordcloud.png", format="png")
+#     else:
+#         plt.show()
+
 
 if __name__ == "__main__":
-    query = input("I want to make a video about")
+    query = input("I want to make a video about ")
 
     print("\nOptimize for:")
     print("1. Views")
@@ -147,4 +253,11 @@ if __name__ == "__main__":
     videos = fetch_video_details(top_video_ids)
     stats = calculate_statistics(videos)
     for key, value in stats.items():
+        print(f"{key}: {value}")
+
+    transcripts = fetch_transcripts(top_video_ids)
+    comments = fetch_comments(top_video_ids)
+
+    insights = derive_insights(transcripts, comments, videos)
+    for key, value in insights.items():
         print(f"{key}: {value}")
