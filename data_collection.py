@@ -55,9 +55,21 @@ def chunk_text(text, max_length):
 # Fetch and sort videos based on user input
 
 
-def fetch_top_videos(query, max_results=10, order="viewCount"):
+def fetch_top_videos(search_type, query, max_results=10, order="viewCount"):
+    if search_type == "about":
+        q = query
+    elif search_type == "in the style of":
+        # This will search for videos from a specific channel
+        q = f"channel:{query}"
+    elif search_type == "like":
+        # For this, you might need a more complex approach, like fetching details of the provided video and then searching for similar videos.
+        # For simplicity, I'm just using the video title for now.
+        video_details = youtube.videos().list(id=query, part="snippet").execute()
+        video_title = video_details["items"][0]["snippet"]["title"]
+        q = video_title
+
     search_response = youtube.search().list(
-        q=query,
+        q=q,
         type="video",
         order=order,
         part="id",
@@ -247,7 +259,27 @@ def generate_wordcloud(text):
 
 
 if __name__ == "__main__":
-    query = input("\nI want to make a video about ")
+    print("\nChoose your search type:")
+    print("1. About (Topic/Category search)")
+    print("2. In the style of (Channel search)")
+    print("3. Like (Video search)")
+
+    search_type_choice = input("Enter your choice (1/2/3): ")
+
+    search_type = ""
+    if search_type_choice == "1":
+        search_type = "about"
+        query = input("\nI want to make a video about: ")
+    elif search_type_choice == "2":
+        search_type = "in the style of"
+        query = input(
+            "\nI want to make a video in the style of (Enter YouTuber or Channel name): ")
+    elif search_type_choice == "3":
+        search_type = "like"
+        video_link = input(
+            "\nI want to make a video like (Provide the video link): ")
+        # Extract video ID from the link and use it as the query
+        query = video_link.split("v=")[-1]
 
     print("\nOptimize for:")
     print("1. Views")
@@ -265,7 +297,7 @@ if __name__ == "__main__":
 
     print("\nCalculating stats and fetching videos")
 
-    top_video_ids = fetch_top_videos(query, order=order)
+    top_video_ids = fetch_top_videos(search_type, query, order=order)
     videos = fetch_video_details(top_video_ids)
     stats = calculate_statistics(videos)
     for key, value in stats.items():
