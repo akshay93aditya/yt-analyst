@@ -51,10 +51,11 @@ def chunk_text(text, max_length):
     chunks.append(' '.join(current_chunk))
     return chunks
 
+
 # Fetch and sort videos based on user input
 
 
-def fetch_top_videos(query, max_results=100, order="viewCount"):
+def fetch_top_videos(query, max_results=10, order="viewCount"):
     search_response = youtube.search().list(
         q=query,
         type="video",
@@ -77,6 +78,7 @@ def fetch_video_details(video_ids):
 
     videos = video_details_response["items"]
     return videos
+
 
 # Calculate stats for videos
 
@@ -103,18 +105,26 @@ def calculate_statistics(videos):
     }
     return stats
 
+# Format data to prevent youtube video id's being passed to OpenAI
+
+
+def remove_video_ids(text):
+    # Regular expression to match typical YouTube video IDs
+    pattern = r'(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{11}(?![A-Za-z0-9_-])'
+    return re.sub(pattern, '', text)
+
 
 def format_metadata(videos):
     formatted_data = []
     for video in videos:
-        title = video.get('title', 'Unknown Title')
-        channel_name = video.get('channel_name', 'Unknown Channel')
-        views = video.get('views', 'Unknown Views')
-        subscribers = video.get('subscribers', 'Unknown Subscribers')
-        publish_date = video.get('publish_date', 'Unknown Date')
+        title = video['snippet']['title']
+        channel_name = video['snippet']['channelTitle']
+        views = video['statistics']['viewCount'] if 'viewCount' in video['statistics'] else "N/A"
+        subscribers = "N/A"  # YouTube API doesn't provide subscribers for individual videos
+        publish_date = video['snippet']['publishedAt']
 
         formatted_data.append(
-            f"Video titled {title} by {channel_name} has {views} views and {subscribers} subscribers. It was published on {publish_date}."
+            f"Video titled {title} by {channel_name} has {views} views. It was published on {publish_date}."
         )
     return ' '.join(formatted_data)
 
@@ -133,7 +143,7 @@ def fetch_transcripts(video_ids):
     return transcripts
 
 
-def fetch_comments(video_ids, max_comments=100):
+def fetch_comments(video_ids, max_comments=10):
     comments = {}
     for video_id in video_ids:
         try:
@@ -152,88 +162,87 @@ def fetch_comments(video_ids, max_comments=100):
             continue
     return comments
 
+
 # Analyze chunked up content
 
 
-def analyze_with_openai(prompt, text):
-    CHUNK_SIZE = 1850  # Adjust based on the model's token limit
-    chunks = [text[i:i+CHUNK_SIZE] for i in range(0, len(text), CHUNK_SIZE)]
+def analyze_with_openai(prompt, text, videos_metadata):
+    CHUNK_SIZE = 1850  # Please adjust this according to the token constraints of your model
+    chunks = [text[i:i + CHUNK_SIZE] for i in range(0, len(text), CHUNK_SIZE)]
     responses = []
 
     for chunk in chunks:
+        messages = [
+            {"role": "system", "content": "You are an expert social media research consultant hired to provide qualitative research insights for a creator. The creator wants to make a video about {user_topic} and aims to optimize for {user_goal}. Based on the provided data about various videos, their views, likes, dislikes, and the content of their transcripts and comments, please provide insights on the following:"},
+            {"role": "user", "content": f"{prompt} {videos_metadata}"},
+            {"role": "user", "content": chunk}
+        ]
+
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system",
-                    "content": "You are an expert social media research consultant"},
-                {"role": "user", "content": prompt},
-                {"role": "assistant", "content": chunk}
-            ]
+            messages=messages
         )
-        responses.append(response.choices[0].message['content'].strip())
+
+        responses.append(response['choices'][0]['message']['content'].strip())
 
     return ' '.join(responses)
-
-
-# Derive insights from aggregated responses
 
 
 def derive_insights(transcripts, comments, videos):
     insights = {}
 
-   # Combine all transcripts and comments
-    transcript_text = " ".join(transcripts)
-    comments_text = " ".join(comments)
+    # Combine all transcripts and comments
+    transcript_text = remove_video_ids(" ".join([" ".join(
+        [segment['text'] for segment in video_transcript]) for video_transcript in transcripts.values()]))
+    comments_text = remove_video_ids(
+        " ".join([comment for sublist in comments.values() for comment in sublist]))
 
     # Format metadata
     metadata = format_metadata(videos)
 
     # Base prompt
-    # Replace with the actual topic the user inputted
     user_topic = query
-    # Replace with the actual goal the user inputted
     user_goal = choice
     base_prompt = f"Role: System. Content: You are an expert social media research consultant hired to provide qualitative research insights for a creator. The creator wants to make a video about {user_topic} and aims to optimize for {user_goal}. Based on the provided data about various videos, their views, likes, dislikes, and the content of their transcripts and comments, please provide insights on the following:"
 
     # Analyze Transcripts
     insights['transcript_analysis'] = {
-        "biggest_youtuber": analyze_with_openai(base_prompt + " Who is the biggest YouTuber in this category?", transcript_text + ' ' + metadata),
-        "topics_covered": analyze_with_openai(base_prompt + " What topics are most often covered in these transcripts?", transcript_text)
+        "biggest_youtuber": analyze_with_openai(base_prompt + " Who is the biggest YouTuber in this category?", transcript_text, metadata),
+        "topics_covered": analyze_with_openai(base_prompt + " What topics are most often covered in these transcripts?", transcript_text, metadata)
     }
 
     # Analyze Comments
     insights['comment_analysis'] = {
-        "positive_reactions": analyze_with_openai(base_prompt + " What are the positive reactions in these comments related to?", comments_text),
-        "negative_reactions": analyze_with_openai(base_prompt + " What are the negative reactions in these comments related to?", comments_text),
-        "referenced_creators": analyze_with_openai(base_prompt + " Which creators or YouTubers are referenced often in these comments?", comments_text),
-        "viewer_requests": analyze_with_openai(base_prompt + " What do viewers request or wish to see most often in these comments?", comments_text),
-        "tired_topics": analyze_with_openai(base_prompt + " What topics or themes do viewers seem tired of or mention negatively?", comments_text),
-        # Assuming you've integrated the word cloud function
-        "word_cloud": analyze_with_openai(base_prompt + "Generate a list of words for a wordcloud of the most commonly used words and phrases", comments_text)
+        "positive_reactions": analyze_with_openai(base_prompt + " What are the positive reactions in these comments related to?", comments_text, metadata),
+        "negative_reactions": analyze_with_openai(base_prompt + " What are the negative reactions in these comments related to?", comments_text, metadata),
+        "referenced_creators": analyze_with_openai(base_prompt + " Which creators or YouTubers are referenced often in these comments?", comments_text, metadata),
+        "viewer_requests": analyze_with_openai(base_prompt + " What do viewers request or wish to see most often in these comments?", comments_text, metadata),
+        "tired_topics": analyze_with_openai(base_prompt + " What topics or themes do viewers seem tired of or mention negatively?", comments_text, metadata),
+        "word_cloud": analyze_with_openai(base_prompt + "Generate a list of words for a wordcloud of the most commonly used words and phrases", comments_text, metadata)
     }
 
     return insights
 
 
-# def generate_wordcloud(text):
-#     wordcloud = WordCloud(width=800, height=800,
-#                           background_color='white',
-#                           stopwords=set(STOPWORDS),
-#                           min_font_size=10).generate(text)
+def generate_wordcloud(text):
+    wordcloud = WordCloud(width=800, height=800,
+                          background_color='white',
+                          stopwords=set(STOPWORDS),
+                          min_font_size=10).generate(text)
 
-#     plt.figure(figsize=(8, 8), facecolor=None)
-#     plt.imshow(wordcloud)
-#     plt.axis("off")
-#     plt.tight_layout(pad=0)
-#     plt.show()
-#     if save_to_file:
-#         plt.savefig("wordcloud.png", format="png")
-#     else:
-#         plt.show()
+    plt.figure(figsize=(8, 8), facecolor=None)
+    plt.imshow(wordcloud)
+    plt.axis("off")
+    plt.tight_layout(pad=0)
+    file_path = "/Users/akshay/Desktop/ytanalyst/png/wordcloud.png"
+    plt.savefig(file_path, format="png")
+    plt.close()
+
+    return file_path
 
 
 if __name__ == "__main__":
-    query = input("I want to make a video about ")
+    query = input("\nI want to make a video about ")
 
     print("\nOptimize for:")
     print("1. Views")
@@ -249,15 +258,19 @@ if __name__ == "__main__":
         # This will sort by the number of videos a channel has, as a proxy for channel popularity
         order = "videoCount"
 
+    print("\nCalculating stats and fetching videos")
+
     top_video_ids = fetch_top_videos(query, order=order)
     videos = fetch_video_details(top_video_ids)
     stats = calculate_statistics(videos)
     for key, value in stats.items():
         print(f"{key}: {value}")
 
+    print("\nFetching transcripts and comments")
     transcripts = fetch_transcripts(top_video_ids)
     comments = fetch_comments(top_video_ids)
 
+    print("\nDeriving insights")
     insights = derive_insights(transcripts, comments, videos)
     for key, value in insights.items():
         print(f"{key}: {value}")
