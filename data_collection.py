@@ -167,13 +167,17 @@ def fetch_comments(video_ids, max_comments=10):
 
 
 def analyze_with_openai(prompt, text, videos_metadata):
-    CHUNK_SIZE = 1850  # Please adjust this according to the token constraints of your model
+    CHUNK_SIZE = 1850  # Adjust this according to the token constraints of your model
     chunks = [text[i:i + CHUNK_SIZE] for i in range(0, len(text), CHUNK_SIZE)]
     responses = []
 
+    # Base prompt
+    user_topic = query
+    user_goal = choice
+
     for chunk in chunks:
         messages = [
-            {"role": "system", "content": "You are an expert social media research consultant hired to provide qualitative research insights for a creator. The creator wants to make a video about {user_topic} and aims to optimize for {user_goal}. Based on the provided data about various videos, their views, likes, dislikes, and the content of their transcripts and comments, please provide insights on the following:"},
+            {"role": "system", "content": f"You are an expert social media research consultant hired to provide qualitative research insights for a creator. The creator wants to make a video about {user_topic} and aims to optimize for {user_goal}. Based on the provided data about various videos, their views, likes, dislikes, and the content of their transcripts and comments, please provide insights on the following:"},
             {"role": "user", "content": f"{prompt} {videos_metadata}"},
             {"role": "user", "content": chunk}
         ]
@@ -185,7 +189,9 @@ def analyze_with_openai(prompt, text, videos_metadata):
 
         responses.append(response['choices'][0]['message']['content'].strip())
 
-    return ' '.join(responses)
+    # Here, instead of joining all the responses, we'll return the most relevant one.
+    # This is a simple heuristic, but you can refine it further.
+    return max(responses, key=len)
 
 
 def derive_insights(transcripts, comments, videos):
@@ -200,28 +206,27 @@ def derive_insights(transcripts, comments, videos):
     # Format metadata
     metadata = format_metadata(videos)
 
-    # Base prompt
-    user_topic = query
-    user_goal = choice
-    base_prompt = f"Role: System. Content: You are an expert social media research consultant hired to provide qualitative research insights for a creator. The creator wants to make a video about {user_topic} and aims to optimize for {user_goal}. Based on the provided data about various videos, their views, likes, dislikes, and the content of their transcripts and comments, please provide insights on the following:"
-
     # Analyze Transcripts
-    insights['transcript_analysis'] = {
-        "biggest_youtuber": analyze_with_openai(base_prompt + " Who is the biggest YouTuber in this category?", transcript_text, metadata),
-        "topics_covered": analyze_with_openai(base_prompt + " What topics are most often covered in these transcripts?", transcript_text, metadata)
-    }
+    insights['biggest_youtuber'] = analyze_with_openai(
+        "Who is the biggest YouTuber in this category?", transcript_text, metadata)
+    insights['topics_covered'] = analyze_with_openai(
+        "List the top 5 topics most often covered in these transcripts.", transcript_text, metadata)
 
     # Analyze Comments
-    insights['comment_analysis'] = {
-        "positive_reactions": analyze_with_openai(base_prompt + " What are the positive reactions in these comments related to?", comments_text, metadata),
-        "negative_reactions": analyze_with_openai(base_prompt + " What are the negative reactions in these comments related to?", comments_text, metadata),
-        "referenced_creators": analyze_with_openai(base_prompt + " Which creators or YouTubers are referenced often in these comments?", comments_text, metadata),
-        "viewer_requests": analyze_with_openai(base_prompt + " What do viewers request or wish to see most often in these comments?", comments_text, metadata),
-        "tired_topics": analyze_with_openai(base_prompt + " What topics or themes do viewers seem tired of or mention negatively?", comments_text, metadata),
-        "word_cloud": analyze_with_openai(base_prompt + "Generate a list of words for a wordcloud of the most commonly used words and phrases", comments_text, metadata)
-    }
+    insights['positive_reactions'] = analyze_with_openai(
+        "List the top 5 positive reactions in these comments.", comments_text, metadata)
+    insights['negative_reactions'] = analyze_with_openai(
+        "List the top 5 negative reactions in these comments.", comments_text, metadata)
+    insights['referenced_creators'] = analyze_with_openai(
+        "Which creators or YouTubers are referenced often in these comments?", comments_text, metadata)
+    insights['viewer_requests'] = analyze_with_openai(
+        "List the top 5 topics viewers request or wish to see most often in these comments.", comments_text, metadata)
+    insights['tired_topics'] = analyze_with_openai(
+        "List the top 5 topics or themes viewers seem tired of or mention negatively.", comments_text, metadata)
+    insights['ideal_video'] = analyze_with_openai(
+        "Describe the ideal video duration, topics, and most requested topics for a video in this category.", comments_text, metadata)
 
-    return insights
+    return insights  # This will now return a dictionary
 
 
 def generate_wordcloud(text):
