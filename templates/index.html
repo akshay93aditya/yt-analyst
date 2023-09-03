@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YT Analyst</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+
+<body>
+    <h1>Welcome to YT Analyst</h1>
+    <form action="/" method="post">
+        <label for="search_type">Choose your search type:</label>
+        <select name="search_type" id="search_type">
+        <option value="about">About (Topic/Category search)</option>
+        <option value="in the style of">In the style of (Channel search)</option>
+        <option value="like">Like (Video search)</option>
+    </select>
+        <br><br>
+
+        <label for="query">Enter your query:</label>
+        <input type="text" id="query" name="query" required>
+        <br><br>
+
+        <label>Optimize for:</label><br>
+        <input type="radio" id="views" name="optimize" value="views" checked>
+        <label for="views">Views</label><br>
+        <input type="radio" id="recency" name="optimize" value="recency">
+        <label for="recency">Recency</label><br>
+        <input type="radio" id="subscribers" name="optimize" value="subscribers">
+        <label for="subscribers">Subscribers</label>
+        <br><br>
+
+        <input type="submit" value="Analyze">
+    </form>
+
+    {% if insights %}
+    <h2>Insights</h2>
+    <ul>
+        {% for key, value in insights.items() %}
+        <li><strong>{{ key.replace('_', ' ').title() }}:</strong> {{ value }}</li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+
+
+</body>
+
+</html>

@@ -56,6 +56,7 @@ def chunk_text(text, max_length):
 
 
 def fetch_top_videos(search_type, query, max_results=10, order="viewCount"):
+    q = " "  # initialize q as an empty string
     if search_type == "about":
         q = query
     elif search_type == "in the style of":
@@ -178,7 +179,7 @@ def fetch_comments(video_ids, max_comments=10):
 # Analyze chunked up content
 
 
-def analyze_with_openai(prompt, text, videos_metadata):
+def analyze_with_openai(prompt, text, videos_metadata, query, choice):
     CHUNK_SIZE = 1850  # Adjust this according to the token constraints of your model
     chunks = [text[i:i + CHUNK_SIZE] for i in range(0, len(text), CHUNK_SIZE)]
     responses = []
@@ -206,7 +207,7 @@ def analyze_with_openai(prompt, text, videos_metadata):
     return max(responses, key=len)
 
 
-def derive_insights(transcripts, comments, videos):
+def derive_insights(transcripts, comments, videos, query, choice):
     insights = {}
 
     # Combine all transcripts and comments
@@ -220,23 +221,23 @@ def derive_insights(transcripts, comments, videos):
 
     # Analyze Transcripts
     insights['biggest_youtuber'] = analyze_with_openai(
-        "Who is the biggest YouTuber in this category?", transcript_text, metadata)
+        "Who is the biggest YouTuber in this category?", transcript_text, metadata, query, choice)
     insights['topics_covered'] = analyze_with_openai(
-        "List the top 5 topics most often covered in these transcripts.", transcript_text, metadata)
+        "List the top 5 topics most often covered in these transcripts.", transcript_text, metadata, query, choice)
 
     # Analyze Comments
     insights['positive_reactions'] = analyze_with_openai(
-        "List the top 5 positive reactions in these comments.", comments_text, metadata)
+        "List the top 5 positive reactions in these comments.", comments_text, metadata, query, choice)
     insights['negative_reactions'] = analyze_with_openai(
-        "List the top 5 negative reactions in these comments.", comments_text, metadata)
+        "List the top 5 negative reactions in these comments.", comments_text, metadata, query, choice)
     insights['referenced_creators'] = analyze_with_openai(
-        "Which creators or YouTubers are referenced often in these comments?", comments_text, metadata)
+        "Which creators or YouTubers are referenced often in these comments?", comments_text, metadata, query, choice)
     insights['viewer_requests'] = analyze_with_openai(
-        "List the top 5 topics viewers request or wish to see most often in these comments.", comments_text, metadata)
+        "List the top 5 topics viewers request or wish to see most often in these comments.", comments_text, metadata, query, choice)
     insights['tired_topics'] = analyze_with_openai(
-        "List the top 5 topics or themes viewers seem tired of or mention negatively.", comments_text, metadata)
+        "List the top 5 topics or themes viewers seem tired of or mention negatively.", comments_text, metadata, query, choice)
     insights['ideal_video'] = analyze_with_openai(
-        "Describe the ideal video duration, topics, and most requested topics for a video in this category.", comments_text, metadata)
+        "Describe the ideal video duration, topics, and most requested topics for a video in this category.", comments_text, metadata, query, choice)
 
     return insights  # This will now return a dictionary
 
@@ -308,6 +309,6 @@ if __name__ == "__main__":
     comments = fetch_comments(top_video_ids)
 
     print("\nDeriving insights")
-    insights = derive_insights(transcripts, comments, videos)
+    insights = derive_insights(transcripts, comments, videos, query, choice)
     for key, value in insights.items():
         print(f"{key}: {value}")

@@ -1,0 +1,12 @@
+<!-- Display stats -->
+{% for key, value in stats.items() %}
+<p>{{ key }}: {{ value }}</p>
+{% endfor %}
+
+<!-- Button to generate insights -->
+<form action="/generate_insights" method="post">
+    <input type="hidden" name="search_type" value="{{ search_type }}">
+    <input type="hidden" name="query" value="{{ query }}">
+    <input type="hidden" name="choice" value="{{ choice }}">
+    <button type="submit">Generate Insights</button>
+</form>
